@@ -1,0 +1,25 @@
+// ============================================================
+// exemplo2.mini — Teste de if/else, booleanos e operadores
+// ============================================================
+
+int x = 42;
+int y = 17;
+bool resultado;
+
+resultado = x > y;
+
+if (resultado) {
+    print(x);
+} else {
+    print(y);
+}
+
+// Teste de expressões compostas
+int z = (x + y) * 2;
+print(z);
+
+// Teste de operadores lógicos
+bool a = true;
+bool b = false;
+bool c = a && !b;
+print(c);   // deve imprimir 1 (true)

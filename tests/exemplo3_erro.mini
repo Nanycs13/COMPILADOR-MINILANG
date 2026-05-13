@@ -1,0 +1,15 @@
+// ============================================================
+// exemplo3_erro.mini — Programa com erros semânticos (deve falhar)
+// ============================================================
+
+int x = 10;
+bool y = true;
+
+// ERRO: soma de int com bool
+int z = x + y;
+
+// ERRO: variável não declarada
+print(w);
+
+// ERRO: redeclaração no mesmo escopo
+int x = 5;

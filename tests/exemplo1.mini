@@ -1,0 +1,20 @@
+// ============================================================
+// exemplo1.mini — Fibonacci iterativo
+// Testa: declaração, while, aritmética, print
+// ============================================================
+
+int n = 10;        // quantos termos de Fibonacci
+int a = 0;
+int b = 1;
+int i = 0;
+int temp;
+
+print(a);          // imprime 0
+
+while (i < n) {
+    temp = a + b;
+    a = b;
+    b = temp;
+    print(a);
+    i = i + 1;
+}
