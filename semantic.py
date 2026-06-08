@@ -2,80 +2,154 @@
 =============================================================================
 ANÁLISE SEMÂNTICA — Compilador MiniLang
 =============================================================================
-Responsabilidades:
-  1. Tabela de Símbolos com suporte a escopo aninhado (pilha de escopos)
-  2. Verificação de declaração prévia de variáveis
-  3. Type Checking — compatibilidade de tipos em operações e atribuições
-  4. Detecção de redeclaração no mesmo escopo
+IMPLEMENTAÇÃO MANUAL — sem typing, sem dataclasses, sem collections
+
+Estruturas de dados implementadas do zero:
+  - PilhaEscopos: pilha de dicionários (lista de listas de pares chave/valor)
+  - Tabela de Símbolos: busca dos escopos mais internos aos mais externos
+  - Lista de erros: acumulada durante a travessia, lançada ao final
 =============================================================================
 """
 
-from typing import Optional, Dict, List
-from ast_nodes import *
+from ast_nodes import (
+    Program, Block, VarDecl, Assignment, IfStmt, WhileStmt,
+    PrintStmt, ReadStmt, BinaryOp, UnaryOp,
+    IntLiteral, BoolLiteral, StringLiteral, Identifier, Visitor
+)
 
 
 # ---------------------------------------------------------------------------
-# Erros Semânticos
+# Erro Semântico
 # ---------------------------------------------------------------------------
 class SemanticError(Exception):
-    def __init__(self, msg: str, line: int = 0):
-        super().__init__(f"[Erro Semântico] L{line} — {msg}")
+    def __init__(self, msg, line=0):
+        full = "[Erro Semantico] L%d -- %s" % (line, msg)
+        Exception.__init__(self, full)
         self.line = line
 
 
 # ---------------------------------------------------------------------------
-# Tabela de Símbolos com escopos aninhados
+# Dicionário simples implementado como lista de pares (chave, valor)
+# (sem usar dict do Python não é viável — dict é estrutura nativa da linguagem,
+#  não uma biblioteca. Aqui implementamos um dicionário manual para os escopos.)
 # ---------------------------------------------------------------------------
-class SymbolTable:
+class DictManual:
     """
-    Implementa uma pilha de escopos (scope stack).
-    Cada escopo é um dicionário {nome → tipo}.
-    Ao entrar em um bloco, empilha; ao sair, desempilha.
+    Dicionário implementado como lista de pares [chave, valor].
+    Operações O(n) — suficiente para o tamanho de programas didáticos.
+    """
+    def __init__(self):
+        self._pares = []   # lista de [chave, valor]
+
+    def set(self, chave, valor):
+        """Insere ou atualiza a chave."""
+        for par in self._pares:
+            if par[0] == chave:
+                par[1] = valor
+                return
+        self._pares.append([chave, valor])
+
+    def get(self, chave):
+        """Retorna o valor ou None se não encontrado."""
+        for par in self._pares:
+            if par[0] == chave:
+                return par[1]
+        return None
+
+    def contem(self, chave):
+        """Retorna True se a chave existe."""
+        for par in self._pares:
+            if par[0] == chave:
+                return True
+        return False
+
+    def itens(self):
+        """Retorna lista de [chave, valor]."""
+        return self._pares
+
+    def tamanho(self):
+        return len(self._pares)
+
+
+# ---------------------------------------------------------------------------
+# Tabela de Símbolos com escopos aninhados (pilha de DictManual)
+# ---------------------------------------------------------------------------
+class TabelaDeSimbolos:
+    """
+    Pilha de escopos implementada como lista de DictManual.
+    - enter_scope(): empilha novo escopo
+    - exit_scope(): desempilha
+    - declarar(): insere no escopo do topo
+    - buscar(): percorre do topo à base (mais interno → mais externo)
     """
 
     def __init__(self):
-        self._scopes: List[Dict[str, str]] = [{}]   # escopo global
+        # Começa com o escopo global
+        self._escopos = [DictManual()]
 
     def enter_scope(self):
-        """Abre um novo escopo (push)."""
-        self._scopes.append({})
+        """Abre um novo escopo (empilha)."""
+        self._escopos.append(DictManual())
 
     def exit_scope(self):
-        """Fecha o escopo atual (pop)."""
-        if len(self._scopes) > 1:
-            self._scopes.pop()
+        """Fecha o escopo atual (desempilha). Nunca remove o global."""
+        if len(self._escopos) > 1:
+            self._escopos.pop()
 
-    def declare(self, name: str, var_type: str, line: int):
-        """Declara variável no escopo atual. Erro se já declarada aqui."""
-        current = self._scopes[-1]
-        if name in current:
+    def declarar(self, nome, tipo, linha):
+        """
+        Declara variável no escopo atual.
+        Lança SemanticError se já declarada neste mesmo escopo.
+        """
+        topo = self._escopos[len(self._escopos) - 1]
+        if topo.contem(nome):
             raise SemanticError(
-                f"Variável '{name}' já declarada neste escopo.", line
+                "Variavel '%s' ja declarada neste escopo." % nome,
+                linha
             )
-        current[name] = var_type
+        topo.set(nome, tipo)
 
-    def lookup(self, name: str) -> Optional[str]:
-        """Busca variável dos escopos mais internos para os mais externos."""
-        for scope in reversed(self._scopes):
-            if name in scope:
-                return scope[name]
+    def buscar(self, nome):
+        """
+        Busca do escopo mais interno ao mais externo.
+        Retorna o tipo (string) ou None se não encontrado.
+        """
+        # Percorre de trás para frente (do topo da pilha à base)
+        i = len(self._escopos) - 1
+        while i >= 0:
+            tipo = self._escopos[i].get(nome)
+            if tipo is not None:
+                return tipo
+            i -= 1
         return None
 
-    def lookup_or_error(self, name: str, line: int) -> str:
+    def buscar_ou_erro(self, nome, linha):
         """Busca variável; lança SemanticError se não encontrada."""
-        t = self.lookup(name)
-        if t is None:
-            raise SemanticError(f"Variável '{name}' não declarada.", line)
-        return t
+        tipo = self.buscar(nome)
+        if tipo is None:
+            raise SemanticError(
+                "Variavel '%s' nao declarada." % nome,
+                linha
+            )
+        return tipo
 
-    def dump(self) -> str:
-        """Representação textual da tabela para debug/relatório."""
-        lines = []
-        for i, scope in enumerate(self._scopes):
-            label = "global" if i == 0 else f"escopo {i}"
-            for name, typ in scope.items():
-                lines.append(f"  [{label}] {name}: {typ}")
-        return "\n".join(lines) if lines else "  (vazia)"
+    def dump(self):
+        """Representação textual para relatório."""
+        linhas = []
+        for i in range(len(self._escopos)):
+            if i == 0:
+                rotulo = "global"
+            else:
+                rotulo = "escopo %d" % i
+            for par in self._escopos[i].itens():
+                linhas.append("  [%s] %s: %s" % (rotulo, par[0], par[1]))
+        if len(linhas) == 0:
+            return "  (vazia)"
+        # Concatena com quebra de linha manualmente
+        resultado = linhas[0]
+        for j in range(1, len(linhas)):
+            resultado = resultado + "\n" + linhas[j]
+        return resultado
 
 
 # ---------------------------------------------------------------------------
@@ -83,196 +157,219 @@ class SymbolTable:
 # ---------------------------------------------------------------------------
 class SemanticAnalyzer(Visitor):
     """
-    Percorre a AST, gerencia a Tabela de Símbolos e verifica tipos.
-    Retorna o tipo de cada expressão para uso no type checking.
+    Percorre a AST usando o Visitor Pattern.
+    - Gerencia a TabelaDeSimbolos com escopos.
+    - Acumula erros em self.erros (lista de strings).
+    - Lança SemanticError ao final se houver erros.
+    - Cada visit_Expressao retorna o tipo da expressão (string).
     """
 
-    # Tipos válidos na linguagem
-    TYPES = {"int", "bool", "string"}
-
-    # Operadores e os tipos que aceitam / o tipo que retornam
-    ARITH_OPS   = {'+', '-', '*', '/'}
-    RELAT_OPS   = {'<', '>', '<=', '>='}
-    EQUAL_OPS   = {'==', '!='}
-    LOGIC_OPS   = {'&&', '||'}
+    # Grupos de operadores para type checking
+    OPS_ARITM  = ('+', '-', '*', '/')
+    OPS_RELAC  = ('<', '>', '<=', '>=')
+    OPS_IGUAL  = ('==', '!=')
+    OPS_LOGICO = ('&&', '||')
 
     def __init__(self):
-        self.symbols = SymbolTable()
-        self.errors: List[str] = []
+        self.simbolos = TabelaDeSimbolos()
+        self.erros    = []   # lista de strings de erro
 
-    def analyze(self, tree: Program):
-        """Ponto de entrada: visita o nó raiz."""
-        tree.accept(self)
-        if self.errors:
-            raise SemanticError(
-                "Erros semânticos encontrados:\n" +
-                "\n".join(self.errors), 0
+    def analisar(self, arvore):
+        """Ponto de entrada: visita o nó raiz e valida."""
+        arvore.accept(self)
+        if len(self.erros) > 0:
+            # Monta mensagem com todos os erros acumulados
+            msg = "Erros semanticos encontrados:\n"
+            for e in self.erros:
+                msg = msg + e + "\n"
+            raise SemanticError(msg, 0)
+        return self.simbolos
+
+    def _registrar_erro(self, msg, linha=0):
+        self.erros.append("  L%d: %s" % (linha, msg))
+
+    # -----------------------------------------------------------------------
+    # Visitores de instrução
+    # -----------------------------------------------------------------------
+
+    def visit_Program(self, node):
+        for stmt in node.stmts:
+            stmt.accept(self)
+
+    def visit_Block(self, node):
+        self.simbolos.enter_scope()
+        for stmt in node.stmts:
+            stmt.accept(self)
+        self.simbolos.exit_scope()
+
+    def visit_VarDecl(self, node):
+        if node.var_type != "int" and node.var_type != "bool":
+            self._registrar_erro(
+                "Tipo desconhecido: '%s'." % node.var_type,
+                node.line
             )
-        return self.symbols
-
-    # -----------------------------------------------------------------------
-    # Helpers de tipo
-    # -----------------------------------------------------------------------
-    def _expect_type(self, actual: str, expected: str, context: str, line: int):
-        if actual != expected:
-            self._err(f"{context}: esperado '{expected}', obtido '{actual}'.", line)
-
-    def _err(self, msg: str, line: int = 0):
-        self.errors.append(f"  L{line}: {msg}")
-
-    # -----------------------------------------------------------------------
-    # Visitores de instruções
-    # -----------------------------------------------------------------------
-    def visit_Program(self, node: Program):
-        for stmt in node.stmts:
-            stmt.accept(self)
-
-    def visit_Block(self, node: Block):
-        self.symbols.enter_scope()
-        for stmt in node.stmts:
-            stmt.accept(self)
-        self.symbols.exit_scope()
-
-    def visit_VarDecl(self, node: VarDecl):
-        if node.var_type not in ("int", "bool"):
-            self._err(f"Tipo desconhecido: '{node.var_type}'.", node.line)
             return
 
-        if node.init:
-            init_type = node.init.accept(self)
-            if init_type and init_type != node.var_type:
-                self._err(
-                    f"Atribuição inválida: '{node.var_type} {node.name}' "
-                    f"não pode receber valor do tipo '{init_type}'.",
+        if node.init is not None:
+            tipo_init = node.init.accept(self)
+            if tipo_init is not None and tipo_init != node.var_type:
+                self._registrar_erro(
+                    "Atribuicao invalida: '%s %s' nao pode receber valor do tipo '%s'."
+                    % (node.var_type, node.name, tipo_init),
                     node.line
                 )
-        try:
-            self.symbols.declare(node.name, node.var_type, node.line)
-        except SemanticError as e:
-            self._err(str(e), node.line)
 
-    def visit_Assignment(self, node: Assignment):
         try:
-            var_type  = self.symbols.lookup_or_error(node.name, node.line)
-            val_type  = node.value.accept(self)
-            if val_type and val_type != var_type:
-                self._err(
-                    f"Atribuição de tipo incompatível: '{node.name}' é '{var_type}', "
-                    f"mas o valor é '{val_type}'.",
+            self.simbolos.declarar(node.name, node.var_type, node.line)
+        except SemanticError as e:
+            self._registrar_erro(str(e), node.line)
+
+    def visit_Assignment(self, node):
+        try:
+            tipo_var = self.simbolos.buscar_ou_erro(node.name, node.line)
+            tipo_val = node.value.accept(self)
+            if tipo_val is not None and tipo_val != tipo_var:
+                self._registrar_erro(
+                    "Atribuicao de tipo incompativel: '%s' e '%s', mas valor e '%s'."
+                    % (node.name, tipo_var, tipo_val),
                     node.line
                 )
         except SemanticError as e:
-            self._err(str(e), node.line)
+            self._registrar_erro(str(e), node.line)
 
-    def visit_IfStmt(self, node: IfStmt):
-        cond_type = node.condition.accept(self)
-        if cond_type and cond_type != "bool":
-            self._err(
-                f"Condição do 'if' deve ser booleana, obtido '{cond_type}'.",
+    def visit_IfStmt(self, node):
+        tipo_cond = node.condition.accept(self)
+        if tipo_cond is not None and tipo_cond != "bool":
+            self._registrar_erro(
+                "Condicao do 'if' deve ser booleana, obtido '%s'." % tipo_cond,
                 node.line
             )
         node.then_body.accept(self)
-        if node.else_body:
+        if node.else_body is not None:
             node.else_body.accept(self)
 
-    def visit_WhileStmt(self, node: WhileStmt):
-        cond_type = node.condition.accept(self)
-        if cond_type and cond_type != "bool":
-            self._err(
-                f"Condição do 'while' deve ser booleana, obtido '{cond_type}'.",
+    def visit_WhileStmt(self, node):
+        tipo_cond = node.condition.accept(self)
+        if tipo_cond is not None and tipo_cond != "bool":
+            self._registrar_erro(
+                "Condicao do 'while' deve ser booleana, obtido '%s'." % tipo_cond,
                 node.line
             )
         node.body.accept(self)
 
-    def visit_PrintStmt(self, node: PrintStmt):
+    def visit_PrintStmt(self, node):
         node.value.accept(self)   # aceita qualquer tipo
 
-    def visit_ReadStmt(self, node: ReadStmt):
+    def visit_ReadStmt(self, node):
         try:
-            var_type = self.symbols.lookup_or_error(node.name, node.line)
-            if var_type not in ("int",):   # read suporta apenas int nesta versão
-                self._err(
-                    f"'read' suporta apenas variáveis do tipo 'int', "
-                    f"mas '{node.name}' é '{var_type}'.",
+            tipo_var = self.simbolos.buscar_ou_erro(node.name, node.line)
+            if tipo_var != "int":
+                self._registrar_erro(
+                    "'read' suporta apenas variaveis 'int', mas '%s' e '%s'."
+                    % (node.name, tipo_var),
                     node.line
                 )
         except SemanticError as e:
-            self._err(str(e), node.line)
+            self._registrar_erro(str(e), node.line)
 
     # -----------------------------------------------------------------------
-    # Visitores de expressão — retornam o tipo da expressão
+    # Visitores de expressão — retornam o tipo (string) da expressão
     # -----------------------------------------------------------------------
-    def visit_IntLiteral(self, node: IntLiteral) -> str:
+
+    def visit_IntLiteral(self, node):
         return "int"
 
-    def visit_BoolLiteral(self, node: BoolLiteral) -> str:
+    def visit_BoolLiteral(self, node):
         return "bool"
 
-    def visit_StringLiteral(self, node: StringLiteral) -> str:
+    def visit_StringLiteral(self, node):
         return "string"
 
-    def visit_Identifier(self, node: Identifier) -> Optional[str]:
+    def visit_Identifier(self, node):
         try:
-            return self.symbols.lookup_or_error(node.name, node.line)
+            return self.simbolos.buscar_ou_erro(node.name, node.line)
         except SemanticError as e:
-            self._err(str(e), node.line)
+            self._registrar_erro(str(e), node.line)
             return None
 
-    def visit_UnaryOp(self, node: UnaryOp) -> Optional[str]:
-        op_type = node.operand.accept(self)
+    def visit_UnaryOp(self, node):
+        tipo_op = node.operand.accept(self)
         if node.op == '!':
-            if op_type and op_type != "bool":
-                self._err(f"'!' requer operando booleano, obtido '{op_type}'.", node.line)
-            return "bool"
-        if node.op == '-':
-            if op_type and op_type != "int":
-                self._err(f"Negação unária requer inteiro, obtido '{op_type}'.", node.line)
-            return "int"
-        return op_type
-
-    def visit_BinaryOp(self, node: BinaryOp) -> Optional[str]:
-        left_t  = node.left.accept(self)
-        right_t = node.right.accept(self)
-        op      = node.op
-
-        if op in self.ARITH_OPS:
-            # Ambos devem ser 'int', resultado é 'int'
-            for t, side in [(left_t, "esquerda"), (right_t, "direita")]:
-                if t and t != "int":
-                    self._err(
-                        f"Operador '{op}' requer inteiros; lado {side} é '{t}'.",
-                        node.line
-                    )
-            return "int"
-
-        if op in self.RELAT_OPS:
-            # Ambos devem ser 'int', resultado é 'bool'
-            for t, side in [(left_t, "esquerda"), (right_t, "direita")]:
-                if t and t != "int":
-                    self._err(
-                        f"Operador '{op}' compara inteiros; lado {side} é '{t}'.",
-                        node.line
-                    )
-            return "bool"
-
-        if op in self.EQUAL_OPS:
-            # Tipos devem ser iguais
-            if left_t and right_t and left_t != right_t:
-                self._err(
-                    f"Comparação '{op}' entre tipos distintos: '{left_t}' e '{right_t}'.",
+            if tipo_op is not None and tipo_op != "bool":
+                self._registrar_erro(
+                    "'!' requer operando booleano, obtido '%s'." % tipo_op,
                     node.line
                 )
             return "bool"
+        if node.op == '-':
+            if tipo_op is not None and tipo_op != "int":
+                self._registrar_erro(
+                    "Negacao unaria requer inteiro, obtido '%s'." % tipo_op,
+                    node.line
+                )
+            return "int"
+        return tipo_op
 
-        if op in self.LOGIC_OPS:
-            # Ambos devem ser 'bool'
-            for t, side in [(left_t, "esquerda"), (right_t, "direita")]:
-                if t and t != "bool":
-                    self._err(
-                        f"Operador '{op}' requer booleanos; lado {side} é '{t}'.",
+    def visit_BinaryOp(self, node):
+        tipo_esq = node.left.accept(self)
+        tipo_dir = node.right.accept(self)
+        op       = node.op
+
+        # Operadores aritméticos: exigem int, produzem int
+        for op_aritm in self.OPS_ARITM:
+            if op == op_aritm:
+                if tipo_esq is not None and tipo_esq != "int":
+                    self._registrar_erro(
+                        "Operador '%s' requer inteiros; lado esquerdo e '%s'." % (op, tipo_esq),
                         node.line
                     )
-            return "bool"
+                if tipo_dir is not None and tipo_dir != "int":
+                    self._registrar_erro(
+                        "Operador '%s' requer inteiros; lado direito e '%s'." % (op, tipo_dir),
+                        node.line
+                    )
+                return "int"
 
-        self._err(f"Operador desconhecido: '{op}'.", node.line)
+        # Operadores relacionais: exigem int, produzem bool
+        for op_rel in self.OPS_RELAC:
+            if op == op_rel:
+                if tipo_esq is not None and tipo_esq != "int":
+                    self._registrar_erro(
+                        "Operador '%s' compara inteiros; lado esquerdo e '%s'." % (op, tipo_esq),
+                        node.line
+                    )
+                if tipo_dir is not None and tipo_dir != "int":
+                    self._registrar_erro(
+                        "Operador '%s' compara inteiros; lado direito e '%s'." % (op, tipo_dir),
+                        node.line
+                    )
+                return "bool"
+
+        # Operadores de igualdade: exigem mesmo tipo, produzem bool
+        for op_ig in self.OPS_IGUAL:
+            if op == op_ig:
+                if tipo_esq is not None and tipo_dir is not None and tipo_esq != tipo_dir:
+                    self._registrar_erro(
+                        "Comparacao '%s' entre tipos distintos: '%s' e '%s'."
+                        % (op, tipo_esq, tipo_dir),
+                        node.line
+                    )
+                return "bool"
+
+        # Operadores lógicos: exigem bool, produzem bool
+        for op_log in self.OPS_LOGICO:
+            if op == op_log:
+                if tipo_esq is not None and tipo_esq != "bool":
+                    self._registrar_erro(
+                        "Operador '%s' requer booleanos; lado esquerdo e '%s'." % (op, tipo_esq),
+                        node.line
+                    )
+                if tipo_dir is not None and tipo_dir != "bool":
+                    self._registrar_erro(
+                        "Operador '%s' requer booleanos; lado direito e '%s'." % (op, tipo_dir),
+                        node.line
+                    )
+                return "bool"
+
+        self._registrar_erro("Operador desconhecido: '%s'." % op, node.line)
         return None

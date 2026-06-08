@@ -3,7 +3,9 @@
 ANÁLISE SINTÁTICA (Parser) — Compilador MiniLang
 =============================================================================
 Método: Parser Descendente Recursivo (Recursive Descent Parser)
-Teoria aplicada: Gramáticas Livres de Contexto (GLC)
+Teoria: Gramáticas Livres de Contexto (GLC)
+
+IMPLEMENTAÇÃO MANUAL — sem typing, sem bibliotecas de parsing
 
 Gramática BNF da linguagem MiniLang:
 
@@ -23,7 +25,7 @@ Gramática BNF da linguagem MiniLang:
   or_expr     → and_expr ('||' and_expr)*
   and_expr    → eq_expr ('&&' eq_expr)*
   eq_expr     → rel_expr (('==' | '!=') rel_expr)*
-  rel_expr    → add_expr (('<' | '>' | '<=' | '>=') add_expr)*
+  rel_expr    → add_expr (('<'|'>'|'<='|'>=') add_expr)*
   add_expr    → mul_expr (('+' | '-') mul_expr)*
   mul_expr    → unary (('*' | '/') unary)*
   unary       → ('!' | '-') unary | primary
@@ -31,68 +33,78 @@ Gramática BNF da linguagem MiniLang:
 =============================================================================
 """
 
-from typing import List, Optional
-from lexer import TokenType, Token
-from ast_nodes import *
+from lexer     import TokenType, Token
+from ast_nodes import (
+    Program, Block, VarDecl, Assignment, IfStmt, WhileStmt,
+    PrintStmt, ReadStmt, BinaryOp, UnaryOp,
+    IntLiteral, BoolLiteral, StringLiteral, Identifier
+)
 
 
+# ---------------------------------------------------------------------------
+# Erro Sintático
+# ---------------------------------------------------------------------------
 class ParseError(Exception):
-    def __init__(self, msg: str, token: Token):
-        super().__init__(
-            f"[Erro Sintático] L{token.line}:C{token.column} — {msg} "
-            f"(encontrado: {token.type.name} '{token.value}')"
+    def __init__(self, msg, token):
+        full = "[Erro Sintatico] L%d:C%d -- %s (encontrado: %s '%s')" % (
+            token.line, token.column, msg,
+            TokenType.name(token.type), token.value
         )
+        Exception.__init__(self, full)
         self.token = token
 
 
+# ---------------------------------------------------------------------------
+# Parser Descendente Recursivo
+# Cada não-terminal da gramática tem um método correspondente.
+# ---------------------------------------------------------------------------
 class Parser:
-    """
-    Parser Descendente Recursivo para MiniLang.
-    Cada não-terminal da gramática tem um método correspondente.
-    """
 
-    def __init__(self, tokens: List[Token]):
-        self.tokens = tokens
-        self.pos    = 0
+    def __init__(self, tokens):
+        self.tokens = tokens   # lista de Token (inclui EOF)
+        self.pos    = 0        # índice do token atual
 
     # -----------------------------------------------------------------------
-    # Primitivas de navegação nos tokens
+    # Primitivas de navegação na lista de tokens
     # -----------------------------------------------------------------------
-    def _current(self) -> Token:
+
+    def _current(self):
+        """Retorna o token atual sem avançar."""
         return self.tokens[self.pos]
 
-    def _peek(self, offset: int = 1) -> Token:
-        idx = self.pos + offset
-        return self.tokens[idx] if idx < len(self.tokens) else self.tokens[-1]
-
-    def _advance(self) -> Token:
+    def _advance(self):
+        """Consome o token atual e retorna ele. Não avança além do EOF."""
         tok = self.tokens[self.pos]
         if tok.type != TokenType.EOF:
             self.pos += 1
         return tok
 
-    def _check(self, *types: TokenType) -> bool:
-        return self._current().type in types
+    def _check(self, *tipos):
+        """Retorna True se o token atual é de algum dos tipos passados."""
+        t = self._current().type
+        for tipo in tipos:
+            if t == tipo:
+                return True
+        return False
 
-    def _match(self, *types: TokenType) -> Optional[Token]:
-        """Consome o token se for de um dos tipos esperados."""
-        if self._check(*types):
+    def _match(self, *tipos):
+        """Consome e retorna o token atual SE for de um dos tipos. Caso contrário None."""
+        if self._check(*tipos):
             return self._advance()
         return None
 
-    def _expect(self, ttype: TokenType, msg: str = "") -> Token:
+    def _expect(self, tipo, msg=""):
         """Consome o token esperado ou lança ParseError."""
-        if self._check(ttype):
+        if self._check(tipo):
             return self._advance()
-        raise ParseError(
-            msg or f"Esperado '{ttype.name}'",
-            self._current()
-        )
+        if not msg:
+            msg = "Esperado '%s'" % TokenType.name(tipo)
+        raise ParseError(msg, self._current())
 
     # -----------------------------------------------------------------------
-    # Ponto de entrada
+    # Ponto de entrada: program → stmt*
     # -----------------------------------------------------------------------
-    def parse(self) -> Program:
+    def parse(self):
         stmts = []
         while not self._check(TokenType.EOF):
             stmts.append(self._parse_stmt())
@@ -101,96 +113,101 @@ class Parser:
     # -----------------------------------------------------------------------
     # Instruções
     # -----------------------------------------------------------------------
-    def _parse_stmt(self) -> ASTNode:
-        cur = self._current()
 
+    def _parse_stmt(self):
+        # var_decl: começa com tipo (int | bool)
         if self._check(TokenType.INT, TokenType.BOOL):
             return self._parse_var_decl()
 
+        # if_stmt
         if self._check(TokenType.IF):
             return self._parse_if()
 
+        # while_stmt
         if self._check(TokenType.WHILE):
             return self._parse_while()
 
+        # print_stmt
         if self._check(TokenType.PRINT):
             return self._parse_print()
 
+        # read_stmt
         if self._check(TokenType.READ):
             return self._parse_read()
 
+        # block
         if self._check(TokenType.LBRACE):
             return self._parse_block()
 
-        # Atribuição: IDENT '=' expr ';'
+        # assignment: IDENT '=' expr ';'
         if self._check(TokenType.IDENTIFIER):
             return self._parse_assignment()
 
-        raise ParseError("Instrução inválida", cur)
+        raise ParseError("Instrucao invalida", self._current())
 
-    def _parse_var_decl(self) -> VarDecl:
+    def _parse_var_decl(self):
         """var_decl → type IDENT ('=' expr)? ';'"""
-        type_tok = self._advance()          # 'int' ou 'bool'
-        var_type = type_tok.value
-        name_tok = self._expect(TokenType.IDENTIFIER, "Esperado nome de variável")
+        type_tok = self._advance()                        # 'int' ou 'bool'
+        var_type = type_tok.value                         # "int" ou "bool"
+        name_tok = self._expect(TokenType.IDENTIFIER, "Esperado nome de variavel")
         name     = name_tok.value
 
         init = None
         if self._match(TokenType.ASSIGN):
             init = self._parse_expr()
 
-        self._expect(TokenType.SEMICOLON, "Esperado ';' após declaração")
+        self._expect(TokenType.SEMICOLON, "Esperado ';' apos declaracao")
         return VarDecl(var_type, name, init, type_tok.line)
 
-    def _parse_assignment(self) -> Assignment:
+    def _parse_assignment(self):
         """assignment → IDENT '=' expr ';'"""
         name_tok = self._advance()
         name     = name_tok.value
-        self._expect(TokenType.ASSIGN, f"Esperado '=' após '{name}'")
+        self._expect(TokenType.ASSIGN, "Esperado '=' apos '%s'" % name)
         value = self._parse_expr()
-        self._expect(TokenType.SEMICOLON, "Esperado ';' após atribuição")
+        self._expect(TokenType.SEMICOLON, "Esperado ';' apos atribuicao")
         return Assignment(name, value, name_tok.line)
 
-    def _parse_if(self) -> IfStmt:
+    def _parse_if(self):
         """if_stmt → 'if' '(' expr ')' block ('else' block)?"""
-        tok = self._advance()   # 'if'
-        self._expect(TokenType.LPAREN, "Esperado '(' após 'if'")
+        tok = self._advance()   # consome 'if'
+        self._expect(TokenType.LPAREN, "Esperado '(' apos 'if'")
         cond = self._parse_expr()
-        self._expect(TokenType.RPAREN, "Esperado ')' após condição")
+        self._expect(TokenType.RPAREN, "Esperado ')' apos condicao")
         then_body = self._parse_block()
         else_body = None
         if self._match(TokenType.ELSE):
             else_body = self._parse_block()
         return IfStmt(cond, then_body, else_body, tok.line)
 
-    def _parse_while(self) -> WhileStmt:
+    def _parse_while(self):
         """while_stmt → 'while' '(' expr ')' block"""
-        tok = self._advance()   # 'while'
-        self._expect(TokenType.LPAREN, "Esperado '(' após 'while'")
+        tok = self._advance()   # consome 'while'
+        self._expect(TokenType.LPAREN, "Esperado '(' apos 'while'")
         cond = self._parse_expr()
-        self._expect(TokenType.RPAREN, "Esperado ')' após condição")
+        self._expect(TokenType.RPAREN, "Esperado ')' apos condicao")
         body = self._parse_block()
         return WhileStmt(cond, body, tok.line)
 
-    def _parse_print(self) -> PrintStmt:
+    def _parse_print(self):
         """print_stmt → 'print' '(' expr ')' ';'"""
-        tok = self._advance()   # 'print'
-        self._expect(TokenType.LPAREN, "Esperado '(' após 'print'")
+        tok = self._advance()   # consome 'print'
+        self._expect(TokenType.LPAREN, "Esperado '(' apos 'print'")
         val = self._parse_expr()
-        self._expect(TokenType.RPAREN, "Esperado ')' após expressão")
+        self._expect(TokenType.RPAREN, "Esperado ')' apos expressao")
         self._expect(TokenType.SEMICOLON, "Esperado ';'")
         return PrintStmt(val, tok.line)
 
-    def _parse_read(self) -> ReadStmt:
+    def _parse_read(self):
         """read_stmt → 'read' '(' IDENT ')' ';'"""
-        tok  = self._advance()   # 'read'
-        self._expect(TokenType.LPAREN, "Esperado '(' após 'read'")
-        name = self._expect(TokenType.IDENTIFIER, "Esperado nome de variável").value
-        self._expect(TokenType.RPAREN, "Esperado ')' após variável")
+        tok  = self._advance()   # consome 'read'
+        self._expect(TokenType.LPAREN, "Esperado '(' apos 'read'")
+        name = self._expect(TokenType.IDENTIFIER, "Esperado nome de variavel").value
+        self._expect(TokenType.RPAREN, "Esperado ')' apos variavel")
         self._expect(TokenType.SEMICOLON, "Esperado ';'")
         return ReadStmt(name, tok.line)
 
-    def _parse_block(self) -> Block:
+    def _parse_block(self):
         """block → '{' stmt* '}'"""
         tok = self._expect(TokenType.LBRACE, "Esperado '{'")
         stmts = []
@@ -200,70 +217,86 @@ class Parser:
         return Block(stmts, tok.line)
 
     # -----------------------------------------------------------------------
-    # Expressões — hierarquia de precedência (gramática LL)
+    # Expressões — hierarquia de precedência codificada na gramática
+    # Cada nível chama o próximo (de menor para maior precedência)
     # -----------------------------------------------------------------------
-    def _parse_expr(self) -> ASTNode:
+
+    def _parse_expr(self):
         return self._parse_or()
 
-    def _parse_or(self) -> ASTNode:
+    def _parse_or(self):
         """or_expr → and_expr ('||' and_expr)*"""
         left = self._parse_and()
-        while tok := self._match(TokenType.OR):
+        tok  = self._match(TokenType.OR)
+        while tok is not None:
             right = self._parse_and()
             left  = BinaryOp('||', left, right, tok.line)
+            tok   = self._match(TokenType.OR)
         return left
 
-    def _parse_and(self) -> ASTNode:
+    def _parse_and(self):
         """and_expr → eq_expr ('&&' eq_expr)*"""
         left = self._parse_equality()
-        while tok := self._match(TokenType.AND):
+        tok  = self._match(TokenType.AND)
+        while tok is not None:
             right = self._parse_equality()
             left  = BinaryOp('&&', left, right, tok.line)
+            tok   = self._match(TokenType.AND)
         return left
 
-    def _parse_equality(self) -> ASTNode:
+    def _parse_equality(self):
         """eq_expr → rel_expr (('==' | '!=') rel_expr)*"""
         left = self._parse_relational()
-        while tok := self._match(TokenType.EQUAL, TokenType.NOT_EQUAL):
+        tok  = self._match(TokenType.EQUAL, TokenType.NOT_EQUAL)
+        while tok is not None:
             right = self._parse_relational()
             left  = BinaryOp(tok.value, left, right, tok.line)
+            tok   = self._match(TokenType.EQUAL, TokenType.NOT_EQUAL)
         return left
 
-    def _parse_relational(self) -> ASTNode:
-        """rel_expr → add_expr (('<' | '>' | '<=' | '>=') add_expr)*"""
+    def _parse_relational(self):
+        """rel_expr → add_expr (('<'|'>'|'<='|'>=') add_expr)*"""
         left = self._parse_add()
-        while tok := self._match(
-                TokenType.LESS, TokenType.GREATER,
-                TokenType.LESS_EQ, TokenType.GREATER_EQ):
+        tok  = self._match(TokenType.LESS, TokenType.GREATER,
+                           TokenType.LESS_EQ, TokenType.GREATER_EQ)
+        while tok is not None:
             right = self._parse_add()
             left  = BinaryOp(tok.value, left, right, tok.line)
+            tok   = self._match(TokenType.LESS, TokenType.GREATER,
+                                TokenType.LESS_EQ, TokenType.GREATER_EQ)
         return left
 
-    def _parse_add(self) -> ASTNode:
+    def _parse_add(self):
         """add_expr → mul_expr (('+' | '-') mul_expr)*"""
         left = self._parse_mul()
-        while tok := self._match(TokenType.PLUS, TokenType.MINUS):
+        tok  = self._match(TokenType.PLUS, TokenType.MINUS)
+        while tok is not None:
             right = self._parse_mul()
             left  = BinaryOp(tok.value, left, right, tok.line)
+            tok   = self._match(TokenType.PLUS, TokenType.MINUS)
         return left
 
-    def _parse_mul(self) -> ASTNode:
+    def _parse_mul(self):
         """mul_expr → unary (('*' | '/') unary)*"""
         left = self._parse_unary()
-        while tok := self._match(TokenType.MULTIPLY, TokenType.DIVIDE):
+        tok  = self._match(TokenType.MULTIPLY, TokenType.DIVIDE)
+        while tok is not None:
             right = self._parse_unary()
             left  = BinaryOp(tok.value, left, right, tok.line)
+            tok   = self._match(TokenType.MULTIPLY, TokenType.DIVIDE)
         return left
 
-    def _parse_unary(self) -> ASTNode:
+    def _parse_unary(self):
         """unary → ('!' | '-') unary | primary"""
-        if tok := self._match(TokenType.NOT):
+        tok = self._match(TokenType.NOT)
+        if tok is not None:
             return UnaryOp('!', self._parse_unary(), tok.line)
-        if tok := self._match(TokenType.MINUS):
+        tok = self._match(TokenType.MINUS)
+        if tok is not None:
             return UnaryOp('-', self._parse_unary(), tok.line)
         return self._parse_primary()
 
-    def _parse_primary(self) -> ASTNode:
+    def _parse_primary(self):
         """primary → INTEGER | BOOLEAN | STRING | IDENT | '(' expr ')'"""
         tok = self._current()
 
@@ -285,7 +318,7 @@ class Parser:
 
         if self._match(TokenType.LPAREN):
             expr = self._parse_expr()
-            self._expect(TokenType.RPAREN, "Esperado ')' após expressão")
+            self._expect(TokenType.RPAREN, "Esperado ')' apos expressao")
             return expr
 
-        raise ParseError("Expressão inválida", tok)
+        raise ParseError("Expressao invalida", tok)

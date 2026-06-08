@@ -1,23 +1,32 @@
+"""
+=============================================================================
+NÓS DA ÁRVORE DE SINTAXE ABSTRATA (AST) — MiniLang
+=============================================================================
+IMPLEMENTAÇÃO MANUAL — sem dataclasses, sem typing
 
-
-from dataclasses import dataclass, field
-from typing import List, Optional, Any
+Cada nó é uma classe Python com __init__ explícito.
+O Visitor Pattern é implementado via método accept() em cada nó,
+que chama o método visit_NomeDoNo(self) no objeto visitante.
+=============================================================================
+"""
 
 
 # ---------------------------------------------------------------------------
-# Classe base de todos os nós
+# Classe base
 # ---------------------------------------------------------------------------
 class ASTNode:
     """Nó base da AST. Todos os nós herdam desta classe."""
     def accept(self, visitor):
+        # Descobre o nome do método pelo tipo do nó
         nome_metodo = 'visit_' + self.__class__.__name__
-        method = getattr(visitor, nome_metodo)
+        metodo = getattr(visitor, nome_metodo)
         return metodo(self)
 
 
 # ---------------------------------------------------------------------------
 # Nós de Expressão
 # ---------------------------------------------------------------------------
+
 class IntLiteral(ASTNode):
     """Literal inteiro: 42"""
     def __init__(self, value, line=0):
@@ -61,6 +70,7 @@ class UnaryOp(ASTNode):
 # ---------------------------------------------------------------------------
 # Nós de Instrução
 # ---------------------------------------------------------------------------
+
 class VarDecl(ASTNode):
     """Declaração de variável: int x; ou int x = 5;"""
     def __init__(self, var_type, name, init, line=0):
@@ -116,7 +126,7 @@ class Program(ASTNode):
 
 
 # ---------------------------------------------------------------------------
-# Visitor base — implementar nas fases seguintes
+# Visitor base — subclasses sobrescrevem os métodos necessários
 # ---------------------------------------------------------------------------
 class Visitor:
     def visit_IntLiteral(self, node):    pass
