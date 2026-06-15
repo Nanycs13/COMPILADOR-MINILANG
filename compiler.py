@@ -1,27 +1,4 @@
-"""
-=============================================================================
-COMPILADOR MINILANG — Ponto de Entrada Principal
-=============================================================================
-IMPLEMENTAÇÃO MANUAL — sem argparse, sem typing
 
-Parsing de argumentos da linha de comando implementado manualmente.
-
-Pipeline:
-  1. Análise Léxica  → lexer.py
-  2. Análise Sintática → parser.py
-  3. Análise Semântica → semantic.py
-  4. Geração de Código Intermediário → ir_generator.py
-  5. Geração de Código Final → codegen.py
-
-Uso:
-  python compiler.py <arquivo.mini>
-  python compiler.py <arquivo.mini> --tokens    (exibe tokens)
-  python compiler.py <arquivo.mini> --ir        (exibe código TAC)
-  python compiler.py <arquivo.mini> --asm       (gera assembly .s)
-  python compiler.py <arquivo.mini> --input 5,3 (entradas para read)
-  python compiler.py <arquivo.mini> -v          (modo detalhado)
-=============================================================================
-"""
 
 import sys
 import os
@@ -33,9 +10,7 @@ from ir_generator import IRGenerator
 from codegen      import TACInterpreter,   X86Generator
 
 
-# ---------------------------------------------------------------------------
-# Banner
-# ---------------------------------------------------------------------------
+
 BANNER = """
 +------------------------------------------+
 |   MiniLang Compiler  v1.0                |
@@ -57,26 +32,20 @@ def _falha(msg):
     print("  [ERRO] " + msg, file=sys.stderr)
 
 
-# ---------------------------------------------------------------------------
-# Parser de argumentos da linha de comando — implementado manualmente
-# (sem argparse)
-# ---------------------------------------------------------------------------
+
 class Argumentos:
-    """Representa os argumentos passados na linha de comando."""
+    
 
     def __init__(self):
-        self.arquivo  = None    # caminho do arquivo .mini
-        self.tokens   = False   # --tokens
-        self.ir       = False   # --ir
-        self.asm      = False   # --asm
-        self.verbose  = False   # -v ou --verbose
-        self.entrada  = ""      # --input VAL
+        self.arquivo  = None    
+        self.tokens   = False   
+        self.ir       = False   
+        self.asm      = False   
+        self.verbose  = False   
+        self.entrada  = ""      
 
 def _parse_args(argv):
-    """
-    Analisa sys.argv manualmente.
-    Retorna um objeto Argumentos ou imprime o uso e encerra.
-    """
+   
     args = Argumentos()
 
     if len(argv) < 2:
@@ -123,16 +92,11 @@ def _parse_args(argv):
     return args
 
 
-# ---------------------------------------------------------------------------
-# Pipeline de compilação
-# ---------------------------------------------------------------------------
-def compilar(fonte, nome_arquivo, args):
-    """
-    Executa todas as fases do compilador.
-    Retorna True se bem-sucedido, False se houve erro.
-    """
 
-    # ── FASE 1: Análise Léxica ───────────────────────────────────────────
+def compilar(fonte, nome_arquivo, args):
+  
+
+   
     _secao("FASE 1 -- Analise Lexica (Scanner / AFD)")
     try:
         lexer  = Lexer(fonte)
@@ -147,7 +111,7 @@ def compilar(fonte, nome_arquivo, args):
         for tok in tokens:
             print("    " + str(tok))
 
-    # ── FASE 2: Análise Sintática ────────────────────────────────────────
+   
     _secao("FASE 2 -- Analise Sintatica (Parser Descendente Recursivo)")
     try:
         parser = Parser(tokens)
@@ -157,7 +121,7 @@ def compilar(fonte, nome_arquivo, args):
         _falha(str(e))
         return False
 
-    # ── FASE 3: Análise Semântica ────────────────────────────────────────
+   
     _secao("FASE 3 -- Analise Semantica (Tabela de Simbolos + Type Checking)")
     try:
         analisador = SemanticAnalyzer()
@@ -170,7 +134,7 @@ def compilar(fonte, nome_arquivo, args):
         _falha(str(e))
         return False
 
-    # ── FASE 4: Geração de Código Intermediário ──────────────────────────
+    
     _secao("FASE 4 -- Geracao de Codigo Intermediario (TAC)")
     gerador = IRGenerator()
     ir      = gerador.gerar(ast)
@@ -182,17 +146,17 @@ def compilar(fonte, nome_arquivo, args):
         print("")
         print(gerador.codigo_str())
 
-    # ── FASE 5: Código Final ─────────────────────────────────────────────
+    
     _secao("FASE 5 -- Geracao de Codigo Final")
 
     if args.asm:
-        # Gera Assembly x86
+        
         x86_gen = X86Generator(ir)
         asm     = x86_gen.gerar()
-        # Troca extensão do arquivo por .s
+       
         base = nome_arquivo
         if '.' in base:
-            # Remove extensão manualmente
+            
             idx = len(base) - 1
             while idx >= 0 and base[idx] != '.':
                 idx -= 1
@@ -207,10 +171,10 @@ def compilar(fonte, nome_arquivo, args):
             print("")
             print(asm)
     else:
-        # Interpreta o TAC diretamente
+        
         entradas = []
         if args.entrada != "":
-            # Converte "5,3,10" → [5, 3, 10] manualmente
+           
             partes = []
             atual  = ""
             for ch in args.entrada:
@@ -239,9 +203,7 @@ def compilar(fonte, nome_arquivo, args):
     return True
 
 
-# ---------------------------------------------------------------------------
-# Ponto de entrada
-# ---------------------------------------------------------------------------
+
 def main():
     print(BANNER)
 
@@ -251,7 +213,7 @@ def main():
         _falha("Arquivo nao encontrado: " + args.arquivo)
         sys.exit(1)
 
-    # Lê o arquivo fonte
+    
     f      = open(args.arquivo, 'r', encoding='utf-8')
     fonte  = f.read()
     f.close()
