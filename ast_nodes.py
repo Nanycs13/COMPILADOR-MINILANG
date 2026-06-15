@@ -1,7 +1,6 @@
 
 class ASTNode:
     def accept(self, visitor):
-        # Descobre o nome do método pelo tipo do nó
         nome_metodo = 'visit_' + self.__class__.__name__
         metodo = getattr(visitor, nome_metodo)
         return metodo(self)
