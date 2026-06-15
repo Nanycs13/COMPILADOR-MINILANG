@@ -9,7 +9,12 @@ from semantic     import SemanticAnalyzer, SemanticError
 from ir_generator import IRGenerator
 from codegen      import TACInterpreter,   X86Generator
 
-
+# python compiler.py <arquivo.mini>
+# python compiler.py <arquivo.mini> --tokens    (exibe tokens)
+#  python compiler.py <arquivo.mini> --ir        (exibe código TAC)
+#  python compiler.py <arquivo.mini> --asm       (gera assembly .s)
+#  python compiler.py <arquivo.mini> --input 5,3 (entradas para read)
+#  python compiler.py <arquivo.mini> -v          (modo detalhado)
 
 BANNER = """
 +------------------------------------------+
