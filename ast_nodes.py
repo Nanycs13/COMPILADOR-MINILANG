@@ -81,7 +81,6 @@ class Block(ASTNode):
         self.line  = line
 
 class Program(ASTNode):
-    """Nó raiz: sequência de declarações e instruções."""
     def __init__(self, stmts):
         self.stmts = stmts   
 
