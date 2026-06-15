@@ -1,15 +1,4 @@
-"""
-=============================================================================
-ANÁLISE SEMÂNTICA — Compilador MiniLang
-=============================================================================
-IMPLEMENTAÇÃO MANUAL — sem typing, sem dataclasses, sem collections
 
-Estruturas de dados implementadas do zero:
-  - PilhaEscopos: pilha de dicionários (lista de listas de pares chave/valor)
-  - Tabela de Símbolos: busca dos escopos mais internos aos mais externos
-  - Lista de erros: acumulada durante a travessia, lançada ao final
-=============================================================================
-"""
 
 from ast_nodes import (
     Program, Block, VarDecl, Assignment, IfStmt, WhileStmt,
@@ -18,9 +7,6 @@ from ast_nodes import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Erro Semântico
-# ---------------------------------------------------------------------------
 class SemanticError(Exception):
     def __init__(self, msg, line=0):
         full = "[Erro Semantico] L%d -- %s" % (line, msg)
@@ -28,21 +14,12 @@ class SemanticError(Exception):
         self.line = line
 
 
-# ---------------------------------------------------------------------------
-# Dicionário simples implementado como lista de pares (chave, valor)
-# (sem usar dict do Python não é viável — dict é estrutura nativa da linguagem,
-#  não uma biblioteca. Aqui implementamos um dicionário manual para os escopos.)
-# ---------------------------------------------------------------------------
 class DictManual:
-    """
-    Dicionário implementado como lista de pares [chave, valor].
-    Operações O(n) — suficiente para o tamanho de programas didáticos.
-    """
+  
     def __init__(self):
         self._pares = []   # lista de [chave, valor]
 
     def set(self, chave, valor):
-        """Insere ou atualiza a chave."""
         for par in self._pares:
             if par[0] == chave:
                 par[1] = valor
@@ -50,57 +27,38 @@ class DictManual:
         self._pares.append([chave, valor])
 
     def get(self, chave):
-        """Retorna o valor ou None se não encontrado."""
         for par in self._pares:
             if par[0] == chave:
                 return par[1]
         return None
 
     def contem(self, chave):
-        """Retorna True se a chave existe."""
         for par in self._pares:
             if par[0] == chave:
                 return True
         return False
 
     def itens(self):
-        """Retorna lista de [chave, valor]."""
         return self._pares
 
     def tamanho(self):
         return len(self._pares)
 
 
-# ---------------------------------------------------------------------------
-# Tabela de Símbolos com escopos aninhados (pilha de DictManual)
-# ---------------------------------------------------------------------------
+
 class TabelaDeSimbolos:
-    """
-    Pilha de escopos implementada como lista de DictManual.
-    - enter_scope(): empilha novo escopo
-    - exit_scope(): desempilha
-    - declarar(): insere no escopo do topo
-    - buscar(): percorre do topo à base (mais interno → mais externo)
-    """
 
     def __init__(self):
-        # Começa com o escopo global
         self._escopos = [DictManual()]
 
     def enter_scope(self):
-        """Abre um novo escopo (empilha)."""
         self._escopos.append(DictManual())
 
     def exit_scope(self):
-        """Fecha o escopo atual (desempilha). Nunca remove o global."""
         if len(self._escopos) > 1:
             self._escopos.pop()
 
     def declarar(self, nome, tipo, linha):
-        """
-        Declara variável no escopo atual.
-        Lança SemanticError se já declarada neste mesmo escopo.
-        """
         topo = self._escopos[len(self._escopos) - 1]
         if topo.contem(nome):
             raise SemanticError(
@@ -110,11 +68,6 @@ class TabelaDeSimbolos:
         topo.set(nome, tipo)
 
     def buscar(self, nome):
-        """
-        Busca do escopo mais interno ao mais externo.
-        Retorna o tipo (string) ou None se não encontrado.
-        """
-        # Percorre de trás para frente (do topo da pilha à base)
         i = len(self._escopos) - 1
         while i >= 0:
             tipo = self._escopos[i].get(nome)
@@ -124,7 +77,6 @@ class TabelaDeSimbolos:
         return None
 
     def buscar_ou_erro(self, nome, linha):
-        """Busca variável; lança SemanticError se não encontrada."""
         tipo = self.buscar(nome)
         if tipo is None:
             raise SemanticError(
@@ -134,7 +86,6 @@ class TabelaDeSimbolos:
         return tipo
 
     def dump(self):
-        """Representação textual para relatório."""
         linhas = []
         for i in range(len(self._escopos)):
             if i == 0:
@@ -145,26 +96,12 @@ class TabelaDeSimbolos:
                 linhas.append("  [%s] %s: %s" % (rotulo, par[0], par[1]))
         if len(linhas) == 0:
             return "  (vazia)"
-        # Concatena com quebra de linha manualmente
         resultado = linhas[0]
         for j in range(1, len(linhas)):
             resultado = resultado + "\n" + linhas[j]
         return resultado
 
-
-# ---------------------------------------------------------------------------
-# Analisador Semântico — Visitor sobre a AST
-# ---------------------------------------------------------------------------
 class SemanticAnalyzer(Visitor):
-    """
-    Percorre a AST usando o Visitor Pattern.
-    - Gerencia a TabelaDeSimbolos com escopos.
-    - Acumula erros em self.erros (lista de strings).
-    - Lança SemanticError ao final se houver erros.
-    - Cada visit_Expressao retorna o tipo da expressão (string).
-    """
-
-    # Grupos de operadores para type checking
     OPS_ARITM  = ('+', '-', '*', '/')
     OPS_RELAC  = ('<', '>', '<=', '>=')
     OPS_IGUAL  = ('==', '!=')
@@ -172,13 +109,11 @@ class SemanticAnalyzer(Visitor):
 
     def __init__(self):
         self.simbolos = TabelaDeSimbolos()
-        self.erros    = []   # lista de strings de erro
+        self.erros    = []   
 
     def analisar(self, arvore):
-        """Ponto de entrada: visita o nó raiz e valida."""
         arvore.accept(self)
         if len(self.erros) > 0:
-            # Monta mensagem com todos os erros acumulados
             msg = "Erros semanticos encontrados:\n"
             for e in self.erros:
                 msg = msg + e + "\n"
@@ -188,9 +123,6 @@ class SemanticAnalyzer(Visitor):
     def _registrar_erro(self, msg, linha=0):
         self.erros.append("  L%d: %s" % (linha, msg))
 
-    # -----------------------------------------------------------------------
-    # Visitores de instrução
-    # -----------------------------------------------------------------------
 
     def visit_Program(self, node):
         for stmt in node.stmts:
@@ -258,7 +190,7 @@ class SemanticAnalyzer(Visitor):
         node.body.accept(self)
 
     def visit_PrintStmt(self, node):
-        node.value.accept(self)   # aceita qualquer tipo
+        node.value.accept(self)   
 
     def visit_ReadStmt(self, node):
         try:
@@ -272,9 +204,6 @@ class SemanticAnalyzer(Visitor):
         except SemanticError as e:
             self._registrar_erro(str(e), node.line)
 
-    # -----------------------------------------------------------------------
-    # Visitores de expressão — retornam o tipo (string) da expressão
-    # -----------------------------------------------------------------------
 
     def visit_IntLiteral(self, node):
         return "int"
@@ -315,7 +244,6 @@ class SemanticAnalyzer(Visitor):
         tipo_dir = node.right.accept(self)
         op       = node.op
 
-        # Operadores aritméticos: exigem int, produzem int
         for op_aritm in self.OPS_ARITM:
             if op == op_aritm:
                 if tipo_esq is not None and tipo_esq != "int":
@@ -330,7 +258,6 @@ class SemanticAnalyzer(Visitor):
                     )
                 return "int"
 
-        # Operadores relacionais: exigem int, produzem bool
         for op_rel in self.OPS_RELAC:
             if op == op_rel:
                 if tipo_esq is not None and tipo_esq != "int":
@@ -345,7 +272,6 @@ class SemanticAnalyzer(Visitor):
                     )
                 return "bool"
 
-        # Operadores de igualdade: exigem mesmo tipo, produzem bool
         for op_ig in self.OPS_IGUAL:
             if op == op_ig:
                 if tipo_esq is not None and tipo_dir is not None and tipo_esq != tipo_dir:
@@ -356,7 +282,6 @@ class SemanticAnalyzer(Visitor):
                     )
                 return "bool"
 
-        # Operadores lógicos: exigem bool, produzem bool
         for op_log in self.OPS_LOGICO:
             if op == op_log:
                 if tipo_esq is not None and tipo_esq != "bool":
