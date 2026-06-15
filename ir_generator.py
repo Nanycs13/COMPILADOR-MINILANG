@@ -1,25 +1,4 @@
-"""
-=============================================================================
-GERAÇÃO DE CÓDIGO INTERMEDIÁRIO — Compilador MiniLang
-=============================================================================
-Representa o código fonte em Código de Três Endereços (TAC).
 
-IMPLEMENTAÇÃO MANUAL — sem dataclasses, sem typing, sem collections
-
-Estrutura TACInstr implementada com __init__ explícito.
-Gerador de temporários e rótulos implementado com contadores manuais.
-
-Formato das instruções TAC:
-  result = arg1 op arg2      (binária)
-  result = op arg1           (unária)
-  result = arg1              (cópia)
-  label:                     (rótulo)
-  goto label                 (salto incondicional)
-  if_false cond goto label   (salto condicional)
-  print arg1                 (saída)
-  read result                (entrada)
-=============================================================================
-"""
 
 from ast_nodes import (
     Program, Block, VarDecl, Assignment, IfStmt, WhileStmt,
@@ -28,20 +7,16 @@ from ast_nodes import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Instrução TAC — classe com __init__ explícito (sem dataclass)
-# ---------------------------------------------------------------------------
+
 class TACInstr:
-    """Uma instrução de Código de Três Endereços."""
 
     def __init__(self, op, result=None, arg1=None, arg2=None):
-        self.op     = op       # string: operador ou tipo de instrução
-        self.result = result   # string: nome do destino, ou None
-        self.arg1   = arg1     # operando 1 (int, bool, string, ou None)
-        self.arg2   = arg2     # operando 2 (idem)
+        self.op     = op       
+        self.result = result   
+        self.arg1   = arg1     
+        self.arg2   = arg2     
 
     def __str__(self):
-        """Formata a instrução de forma legível."""
         if self.op == 'label':
             return "%s:" % self.result
 
@@ -66,54 +41,38 @@ class TACInstr:
         if self.op == 'unary_not':
             return "  %s = !%s" % (self.result, str(self.arg1))
 
-        # Operação binária genérica
+        
         return "  %s = %s %s %s" % (
             self.result, str(self.arg1), self.op, str(self.arg2)
         )
 
 
-# ---------------------------------------------------------------------------
-# Gerador de Código Intermediário — Visitor sobre a AST
-# ---------------------------------------------------------------------------
 class IRGenerator(Visitor):
-    """
-    Percorre a AST e emite instruções TAC.
-    Temporários: t0, t1, t2, ...  (contador _temp_count)
-    Rótulos:     L0, L1, L2, ...  (contador _label_count)
-    """
 
     def __init__(self):
         self.instrucoes  = []   # lista de TACInstr
         self._temp_count  = 0
         self._label_count = 0
 
-    # -----------------------------------------------------------------------
-    # Geração de nomes únicos
-    # -----------------------------------------------------------------------
 
     def _novo_temp(self):
-        """Gera próximo temporário: t0, t1, t2, ..."""
         nome = "t%d" % self._temp_count
         self._temp_count += 1
         return nome
 
     def _novo_rotulo(self):
-        """Gera próximo rótulo: L0, L1, L2, ..."""
         nome = "L%d" % self._label_count
         self._label_count += 1
         return nome
 
     def _emitir(self, instr):
-        """Adiciona instrução à lista."""
         self.instrucoes.append(instr)
 
     def gerar(self, arvore):
-        """Ponto de entrada: percorre a AST e retorna lista de TACInstr."""
         arvore.accept(self)
         return self.instrucoes
 
     def codigo_str(self):
-        """Retorna o código TAC como string formatada."""
         resultado = ""
         for i in range(len(self.instrucoes)):
             if i == 0:
@@ -122,9 +81,6 @@ class IRGenerator(Visitor):
                 resultado = resultado + "\n" + str(self.instrucoes[i])
         return resultado
 
-    # -----------------------------------------------------------------------
-    # Visitores de instrução
-    # -----------------------------------------------------------------------
 
     def visit_Program(self, node):
         for stmt in node.stmts:
@@ -144,16 +100,6 @@ class IRGenerator(Visitor):
         self._emitir(TACInstr('copy', node.name, src))
 
     def visit_IfStmt(self, node):
-        """
-        Tradução do if-else para TAC com saltos:
-          <avaliar condição>
-          if_false cond goto L_else
-          <then>
-          goto L_fim
-        L_else:
-          <else>
-        L_fim:
-        """
         cond   = node.condition.accept(self)
         l_else = self._novo_rotulo()
         l_fim  = self._novo_rotulo()
@@ -167,15 +113,6 @@ class IRGenerator(Visitor):
         self._emitir(TACInstr('label', result=l_fim))
 
     def visit_WhileStmt(self, node):
-        """
-        Tradução do while para TAC:
-        L_inicio:
-          <avaliar condição>
-          if_false cond goto L_fim
-          <corpo>
-          goto L_inicio
-        L_fim:
-        """
         l_inicio = self._novo_rotulo()
         l_fim    = self._novo_rotulo()
 
@@ -193,21 +130,18 @@ class IRGenerator(Visitor):
     def visit_ReadStmt(self, node):
         self._emitir(TACInstr('read', result=node.name))
 
-    # -----------------------------------------------------------------------
-    # Visitores de expressão — retornam o operando resultado (nome ou literal)
-    # -----------------------------------------------------------------------
 
     def visit_IntLiteral(self, node):
-        return node.value        # inteiro diretamente (constante)
+        return node.value        
 
     def visit_BoolLiteral(self, node):
-        return node.value        # True ou False
+        return node.value        
 
     def visit_StringLiteral(self, node):
         return '"' + node.value + '"'
 
     def visit_Identifier(self, node):
-        return node.name         # nome da variável
+        return node.name         
 
     def visit_UnaryOp(self, node):
         operando = node.operand.accept(self)
