@@ -1,29 +1,9 @@
-"""
-=============================================================================
-GERAÇÃO DE CÓDIGO FINAL — Compilador MiniLang
-=============================================================================
-IMPLEMENTAÇÃO MANUAL — sem typing, sem collections
 
-Duas saídas disponíveis:
-
-1. Interpretador TAC — executa o código intermediário diretamente.
-   Máquina virtual simples com memória implementada como DictManual.
-
-2. Gerador de Assembly x86 (AT&T / GAS)
-   Traduz cada instrução TAC para Assembly x86.
-   Variáveis e temporários → seção .data (inteiros 32 bits).
-=============================================================================
-"""
 
 from ir_generator import TACInstr
 
 
-# ---------------------------------------------------------------------------
-# DictManual — dicionário via lista de pares (sem collections)
-# (mesmo padrão usado no semantic.py)
-# ---------------------------------------------------------------------------
 class DictManual:
-    """Dicionário implementado como lista de pares [chave, valor]."""
 
     def __init__(self):
         self._pares = []
@@ -53,23 +33,13 @@ class DictManual:
             resultado.append(par[0])
         return resultado
 
-
-# ---------------------------------------------------------------------------
-# Interpretador de TAC — máquina virtual para execução direta
-# ---------------------------------------------------------------------------
 class TACInterpreter:
-    """
-    Executa as instruções TAC em uma máquina virtual simples.
-    Memória: DictManual {nome → valor}
-    Labels: DictManual {nome → índice de instrução}
-    """
 
     def __init__(self, instrucoes):
         self.instrucoes = instrucoes
         self.memoria    = DictManual()
-        self.saida      = []   # lista de strings impressas
+        self.saida      = []   
 
-        # Pré-computa mapa de rótulos → índice de instrução
         self.rotulos = DictManual()
         for i in range(len(instrucoes)):
             instr = instrucoes[i]
@@ -77,12 +47,6 @@ class TACInterpreter:
                 self.rotulos.set(instr.result, i)
 
     def _resolver(self, operando):
-        """
-        Resolve um operando:
-         - int ou bool → retorna direto (constante)
-         - string entre aspas → retorna sem as aspas (literal string)
-         - string sem aspas → busca na memória (variável/temp)
-        """
         if isinstance(operando, int) or isinstance(operando, bool):
             return operando
         if isinstance(operando, str):
@@ -93,11 +57,6 @@ class TACInterpreter:
         return operando
 
     def executar(self, entradas=None):
-        """
-        Executa o programa TAC.
-        entradas: lista de inteiros para instruções 'read'.
-        Retorna lista de strings (saída do programa).
-        """
         if entradas is None:
             entradas = []
         # Copia para não modificar o original
@@ -106,7 +65,7 @@ class TACInterpreter:
             fila_entrada.append(v)
 
         pc        = 0
-        max_steps = 100000   # proteção contra loop infinito
+        max_steps = 100000   
 
         passo = 0
         while passo < max_steps:
@@ -118,20 +77,16 @@ class TACInterpreter:
             passo += 1
             op    = instr.op
 
-            # Rótulo: apenas marca posição, não executa
             if op == 'label':
                 continue
 
-            # Cópia simples: result = arg1
             elif op == 'copy':
                 self.memoria.set(instr.result, self._resolver(instr.arg1))
 
-            # Saída
             elif op == 'print':
                 val = self._resolver(instr.arg1)
                 self.saida.append(str(val))
 
-            # Entrada
             elif op == 'read':
                 if len(fila_entrada) > 0:
                     val = fila_entrada[0]
@@ -140,13 +95,11 @@ class TACInterpreter:
                     val = int(input("read(%s): " % instr.result))
                 self.memoria.set(instr.result, val)
 
-            # Salto incondicional
             elif op == 'goto':
                 idx = self.rotulos.get(instr.arg1, -1)
                 if idx >= 0:
                     pc = idx + 1
 
-            # Salto condicional: pula se cond for falso
             elif op == 'if_false':
                 cond = self._resolver(instr.arg1)
                 if not cond:
@@ -154,16 +107,13 @@ class TACInterpreter:
                     if idx >= 0:
                         pc = idx + 1
 
-            # Negação unária
             elif op == 'unary_minus':
                 self.memoria.set(instr.result, -self._resolver(instr.arg1))
 
-            # NOT lógico
             elif op == 'unary_not':
                 val = self._resolver(instr.arg1)
                 self.memoria.set(instr.result, not val)
 
-            # Operadores binários
             else:
                 a = self._resolver(instr.arg1)
                 b = self._resolver(instr.arg2)
@@ -173,11 +123,11 @@ class TACInterpreter:
                 elif op == '-':  r = a - b
                 elif op == '*':  r = a * b
                 elif op == '/':
-                    # Divisão inteira
+                    
                     if b == 0:
-                        r = 0   # evita crash; divisão por zero retorna 0
+                        r = 0   
                     else:
-                        # Implementa divisão inteira sem usar //
+                        
                         neg = (a < 0) != (b < 0)
                         a_abs = a if a >= 0 else -a
                         b_abs = b if b >= 0 else -b
@@ -199,28 +149,15 @@ class TACInterpreter:
         return self.saida
 
 
-# ---------------------------------------------------------------------------
-# Gerador de Assembly x86 (AT&T / GAS)
-# ---------------------------------------------------------------------------
 class X86Generator:
-    """
-    Traduz instruções TAC para Assembly x86 sintaxe AT&T (GAS).
-    Todas as variáveis e temporários ficam na seção .data (long = 32 bits).
-    Registradores de trabalho: %eax, %ebx.
 
-    Para compilar (Linux):
-      gcc -o programa output.s
-    """
 
     def __init__(self, instrucoes):
         self.instrucoes = instrucoes
         self.variaveis  = self._coletar_variaveis()
 
     def _eh_nome_variavel(self, v):
-        """
-        Retorna True se v é um nome de variável/temporário
-        (não é literal, não é rótulo, não é None).
-        """
+
         if v is None:
             return False
         if isinstance(v, int) or isinstance(v, bool):
@@ -234,17 +171,13 @@ class X86Generator:
         return False
 
     def _coletar_variaveis(self):
-        """
-        Coleta todos os nomes de variáveis e temporários nas instruções.
-        Retorna lista de strings (sem duplicatas), ordenada.
-        """
+    
         vistos  = []
         nomes   = []
 
         for instr in self.instrucoes:
             for v in (instr.result, instr.arg1, instr.arg2):
                 if self._eh_nome_variavel(v):
-                    # Verifica se já está na lista (sem usar set)
                     ja_existe = False
                     for visto in vistos:
                         if visto == v:
@@ -254,7 +187,6 @@ class X86Generator:
                         vistos.append(v)
                         nomes.append(v)
 
-        # Ordena manualmente (bubble sort simples — didático)
         n = len(nomes)
         for i in range(n):
             for j in range(0, n - i - 1):
@@ -264,22 +196,19 @@ class X86Generator:
         return nomes
 
     def _operando_asm(self, v):
-        """Converte operando TAC para sintaxe AT&T."""
         if isinstance(v, bool):
             return "$%d" % (1 if v else 0)
         if isinstance(v, int):
             return "$%d" % v
         if isinstance(v, str):
-            return "%s(%%rip)" % v   # variável global
+            return "%s(%%rip)" % v   
 
         return str(v)
 
     def gerar(self):
-        """Retorna string com o código Assembly completo."""
 
         linhas = []
 
-        # ── Seção de dados: declara todas as variáveis como int32 = 0
         linhas.append("    .section .data")
         for var in self.variaveis:
             linhas.append("%-12s .long 0" % (var + ":"))
@@ -365,7 +294,7 @@ class X86Generator:
                 else:          linhas.append("    orl  %ebx, %eax")
                 linhas.append("    movl %%eax, %s(%s)" % (instr.result, "%rip"))
 
-        # Epílogo
+        
         linhas.append("    xorl %eax, %eax")
         linhas.append("    popq %rbp")
         linhas.append("    ret")
@@ -374,7 +303,7 @@ class X86Generator:
         linhas.append('fmt_int: .string "%d\\n"')
         linhas.append('fmt_str: .string "%s\\n"')
 
-        # Concatena todas as linhas
+        
         resultado = ""
         for i in range(len(linhas)):
             if i == 0:
